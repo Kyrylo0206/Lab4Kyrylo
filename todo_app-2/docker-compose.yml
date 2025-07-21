@@ -1,0 +1,87 @@
+services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      - RABBITMQ_DEFAULT_USER=rmuser
+      - RABBITMQ_DEFAULT_PASS=rmpassword
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - app_network
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.41
+    ports:
+      - "16686:16686"
+      - "6831:6831/udp"
+    networks:
+      - app_network
+
+  producer:
+    build: 
+      context: .  
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=sqlite:///./todos.db
+      - RABBITMQ_URL=amqp://rmuser:rmpassword@rabbitmq:5672/
+      - TODO_QUEUE=messages
+      - DEAD_LETTER_QUEUE=dead_letter_queue
+      - JAEGER_SERVICE_NAME=todo-api
+      - JAEGER_AGENT_HOST=jaeger
+      - JAEGER_AGENT_PORT=6831
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8000/docs"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      jaeger:
+        condition: service_started
+    networks:
+      - app_network
+    volumes:
+      - .:/app:ro  
+  consumer:
+    build:
+      context: ./consumer
+      dockerfile: Dockerfile
+    environment:
+      - RABBITMQ_URL=amqp://rmuser:rmpassword@rabbitmq:5672/
+      - TODO_QUEUE=messages
+      - DEAD_LETTER_QUEUE=dead_letter_queue
+      - JAEGER_SERVICE_NAME=todo-consumer
+      - JAEGER_AGENT_HOST=jaeger
+      - JAEGER_AGENT_PORT=6831
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0 if True else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      jaeger:
+        condition: service_started
+    networks:
+      - app_network
+    volumes:
+      - ./consumer:/app:ro
+
+networks:
+  app_network:
+    driver: bridge
+
+volumes:
+  rabbitmq_data:

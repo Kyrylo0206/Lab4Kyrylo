@@ -1,0 +1,8 @@
+pika
+jaeger-client
+opentracing
+pydantic
+python-dotenv
+fastapi
+uvicorn
+httpx
